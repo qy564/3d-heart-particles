@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D 蓝色爱心粒子</title>
+<style>
+* { margin: 0; padding: 0; }
+body { overflow: hidden; background: #000; }
+canvas { display: block; }
+</style>
+</head>
+<body>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'https://unpkg.com/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+// ========== 场景 ==========
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x000011, 0.0035);
+
+const camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 500);
+camera.position.set(0, 2, 30);
+
+const renderer = new THREE.WebGLRenderer({ 
+    antialias: true, 
+    alpha: false,
+    powerPreference: "high-performance"
+});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+document.body.appendChild(renderer.domElement);
+
+// ========== 心形粒子 ==========
+const TOTAL = 8000;
+const heartTargets = [];
+const bottomY = -18;
+
+// 生成心形点
+for (let i = 0; i < TOTAL; i++) {
+    const t = Math.random() * Math.PI * 2;
+    const r = Math.random();
+    const scale = 7.5;
+    const x = scale * (16 * Math.pow(Math.sin(t), 3)) * (0.6 + 0.4 * r);
+    const z = scale * (13 * Math.cos(t) - 5 * Math.cos(2*t) - 2 * Math.cos(3*t) - Math.cos(4*t)) * (0.6 + 0.4 * r);
+    
+    const thickMax = 2.2 * (1 - Math.abs(z) / (scale * 16)); 
+    const y = (Math.random() - 0.5) * thickMax;
+    
+    const px = x;
+    const py = z;
+    const pz = y;
+    heartTargets.push({ x: px, y: py, z: pz });
+}
+
+// ========== 粒子尺寸 ==========
+const sizeMap = new Float32Array(TOTAL);
+for (let i = 0; i < TOTAL; i++) {
+    sizeMap[i] = 0.15 + Math.random() * 0.45;
+}
+
+// ========== 1. 主体粒子群 ==========
+const geo = new THREE.BufferGeometry();
+const pos = new Float32Array(TOTAL * 3);
+const target = new Float32Array(TOTAL * 3);
+const start = new Float32Array(TOTAL * 3);
+const delay = new Float32Array(TOTAL);
+
+for (let i = 0; i < TOTAL; i++) {
+    const p = heartTargets[i];
+    const i3 = i * 3;
+    target[i3] = p.x;
+    target[i3+1] = p.y;
+    target[i3+2] = p.z;
+    
+    start[i3] = p.x + (Math.random() - 0.5) * 20;
+    start[i3+1] = bottomY + Math.random() * 6;
+    start[i3+2] = p.z + (Math.random() - 0.5) * 20;
+    
+    pos[i3] = start[i3];
+    pos[i3+1] = start[i3+1];
+    pos[i3+2] = start[i3+2];
+    
+    const ny = (p.y + 20) / 32;
+    delay[i] = ny * 0.7 + Math.random() * 0.2;
+}
+
+geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+geo.setAttribute('size', new THREE.BufferAttribute(sizeMap, 1));
+
+// ----- 粒子纹理（发光圆点）-----
+function makeGlowSprite() {
+    const c = document.createElement('canvas');
+    c.width = 64; c.height = 64;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.15, 'rgba(180,220,255,0.9)');
+    g.addColorStop(0.4, 'rgba(80,140,255,0.5)');
+    g.addColorStop(1, 'rgba(30,60,200,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 64, 64);
+    return new THREE.CanvasTexture(c);
+}
+
+const mat = new THREE.PointsMaterial({
+    size: 0.55,
+    map: makeGlowSprite(),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+    opacity: 0.95,
+    color: 0x88bbff,
+    sizeAttenuation: true,
+    toneMapped: true,
+});
+
+const heart = new THREE.Points(geo, mat);
+scene.add(heart);
+
+// ========== 2. 内部发光核心 ==========
+const coreMat = new THREE.PointsMaterial({
+    size: 0.3,
+    map: makeGlowSprite(),
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    transparent: true,
+    color: 0xffffff,
+    opacity: 0.7,
+    sizeAttenuation: true,
+});
+const coreGeo = new THREE.BufferGeometry();
+const corePos = new Float32Array(2000 * 3);
+for (let i = 0; i < 2000; i++) {
+    const idx = Math.floor(Math.random() * TOTAL);
+    const p = heartTargets[idx];
+    corePos[i*3] = p.x + (Math.random()-0.5)*0.8;
+    corePos[i*3+1] = p.y + (Math.random()-0.5)*0.8;
+    corePos[i*3+2] = p.z + (Math.random()-0.5)*0.8;
+}
+coreGeo.setAttribute('position', new THREE.BufferAttribute(corePos, 3));
+const core = new THREE.Points(coreGeo, coreMat);
+scene.add(core);
+
+// ========== 3. 外部流光粒子（环绕） ==========
+const orbitCount = 400;
+const orbitGeo = new THREE.BufferGeometry();
+const orbitPos = new Float32Array(orbitCount * 3);
+const orbitData = [];
+for (let i = 0; i < orbitCount; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 7 + Math.random() * 4;
+    const height = (Math.random() - 0.5) * 16;
+    orbitPos[i*3] = Math.cos(angle) * radius;
+    orbitPos[i*3+1] = height;
+    orbitPos[i*3+2] = Math.sin(angle) * radius;
+    orbitData.push({ angle, radius, height, speed: 0.003 + Math.random() * 0.005, offset: Math.random() * Math.PI * 2 });
+}
+orbitGeo.setAttribute('position', new THREE.BufferAttribute(orbitPos, 3));
+const orbitMat = new THREE.PointsMaterial({
+    size: 0.2,
+    map: makeGlowSprite(),
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    opacity: 0.4,
+    color: 0x4488ff,
+    depthWrite: false,
+});
+const orbitPoints = new THREE.Points(orbitGeo, orbitMat);
+scene.add(orbitPoints);
+
+// ========== 4. 底部光晕 ==========
+function makeGlow(size, color1, color2) {
+    const c = document.createElement('canvas');
+    c.width = 256; c.height = 256;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
+    g.addColorStop(0, color1);
+    g.addColorStop(0.6, color2);
+    g.addColorStop(1, 'rgba(0,0,10,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 256, 256);
+    const tex = new THREE.CanvasTexture(c);
+    const m = new THREE.SpriteMaterial({ map: tex, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false });
+    const s = new THREE.Sprite(m);
+    s.scale.set(size, size, 1);
+    return s;
+}
+
+const glow1 = makeGlow(45, 'rgba(40,80,255,0.12)', 'rgba(20,40,180,0.05)');
+glow1.position.set(0, -3, 0);
+scene.add(glow1);
+
+const glow2 = makeGlow(30, 'rgba(80,150,255,0.08)', 'rgba(30,60,200,0.03)');
+glow2.position.set(0, 2, 0);
+scene.add(glow2);
+
+// ========== 5. 背景星云 ==========
+const starCount = 2000;
+const starGeo = new THREE.BufferGeometry();
+const starPos2 = new Float32Array(starCount * 3);
+const starColors = new Float32Array(starCount * 3);
+for (let i = 0; i < starCount; i++) {
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
+    const r = 60 + Math.random() * 80;
+    starPos2[i*3] = r * Math.sin(phi) * Math.cos(theta);
+    starPos2[i*3+1] = r * Math.cos(phi) * 0.4;
+    starPos2[i*3+2] = r * Math.sin(phi) * Math.sin(theta);
+    const b = 0.3 + Math.random() * 0.5;
+    starColors[i*3] = 0.3 * b;
+    starColors[i*3+1] = 0.5 * b;
+    starColors[i*3+2] = b;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos2, 3));
+starGeo.setAttribute('color', new THREE.BufferAttribute(starColors, 3));
+const starMat2 = new THREE.PointsMaterial({
+    size: 0.3,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.6,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+});
+const stars = new THREE.Points(starGeo, starMat2);
+scene.add(stars);
+
+// ========== 6. 粒子拖尾效果 ==========
+const trailCount = 6000;
+const trailGeo = new THREE.BufferGeometry();
+const trailPos = new Float32Array(trailCount * 3);
+const trailLife = new Float32Array(trailCount);
+for (let i = 0; i < trailCount; i++) {
+    trailPos[i*3] = (Math.random() - 0.5) * 50;
+    trailPos[i*3+1] = bottomY + Math.random() * 40;
+    trailPos[i*3+2] = (Math.random() - 0.5) * 50;
+    trailLife[i] = Math.random();
+}
+trailGeo.setAttribute('position', new THREE.BufferAttribute(trailPos, 3));
+const trailMat = new THREE.PointsMaterial({
+    size: 0.12,
+    map: makeGlowSprite(),
+    blending: THREE.AdditiveBlending,
+    transparent: true,
+    opacity: 0.25,
+    color: 0x4466ff,
+    depthWrite: false,
+});
+const trails = new THREE.Points(trailGeo, trailMat);
+scene.add(trails);
+
+// ========== 动画控制 ==========
+const posAttr = geo.attributes.position;
+const posArr = posAttr.array;
+let progress = 0;
+const SPEED = 0.006;
+
+const clock = new THREE.Clock();
+
+function animate() {
+    requestAnimationFrame(animate);
+    const dt = clock.getDelta();
+    const elapsed = clock.getElapsedTime();
+    
+    // 粒子堆积动画
+    if (progress < 1) {
+        progress += SPEED;
+        if (progress > 1) progress = 1;
+    }
+    
+    for (let i = 0; i < TOTAL; i++) {
+        const i3 = i * 3;
+        const d = delay[i];
+        let p;
+        if (progress <= d) {
+            p = 0;
+        } else {
+            const t = (progress - d) / (1 - d);
+            // easeOutCubic
+            p = 1 - Math.pow(1 - t, 3);
+        }
+        posArr[i3] = start[i3] + (target[i3] - start[i3]) * p;
+        posArr[i3+1] = start[i3+1] + (target[i3+1] - start[i3+1]) * p;
+        posArr[i3+2] = start[i3+2] + (target[i3+2] - start[i3+2]) * p;
+    }
+    posAttr.needsUpdate = true;
+    
+    // 环绕粒子运动
+    const oPos = orbitGeo.attributes.position.array;
+    for (let i = 0; i < orbitCount; i++) {
+        const o = orbitData[i];
+        o.angle += o.speed;
+        const rad = o.radius + Math.sin(elapsed * 0.5 + o.offset) * 0.5;
+        oPos[i*3] = Math.cos(o.angle) * rad;
+        oPos[i*3+1] = o.height + Math.sin(elapsed * 0.3 + o.offset) * 1.5;
+        oPos[i*3+2] = Math.sin(o.angle) * rad;
+    }
+    orbitGeo.attributes.position.needsUpdate = true;
+    
+    // 拖尾粒子浮动
+    const tPos = trailGeo.attributes.position.array;
+    for (let i = 0; i < trailCount; i++) {
+        trailLife[i] += 0.003;
+        if (trailLife[i] > 1) {
+            trailLife[i] = 0;
+            const targetIdx = Math.floor(Math.random() * TOTAL);
+            const tt = heartTargets[targetIdx];
+            tPos[i*3] = tt.x + (Math.random() - 0.5) * 2;
+            tPos[i*3+1] = tt.y + (Math.random() - 0.5) * 2;
+            tPos[i*3+2] = tt.z + (Math.random() - 0.5) * 2;
+        }
+        // 向外扩散
+        const spread = 2 + trailLife[i] * 8;
+        const idx = Math.floor(Math.random() * TOTAL) % TOTAL;
+        // 简化：保持当前位置即可
+    }
+    trailGeo.attributes.position.needsUpdate = true;
+    
+    // 旋转
+    heart.rotation.y += 0.003;
+    core.rotation.y += 0.003;
+    stars.rotation.y += 0.0003;
+    
+    // 呼吸效果
+    const breathe = 1 + Math.sin(elapsed * 0.6) * 0.02;
+    mat.size = 0.55 * breathe;
+    coreMat.size = 0.3 * breathe;
+    
+    // 光晕脉冲
+    const pulse = 1 + Math.sin(elapsed * 0.8) * 0.05;
+    glow1.scale.set(45 * pulse, 45 * pulse, 1);
+    glow2.scale.set(30 * (1 + Math.sin(elapsed * 0.5 + 1) * 0.08), 30 * (1 + Math.sin(elapsed * 0.5 + 1) * 0.08), 1);
+    
+    renderer.render(scene, camera);
+}
+
+// ========== 窗口自适应 ==========
+window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ========== 点击重置 ==========
+document.addEventListener('click', () => {
+    progress = 0;
+    for (let i = 0; i < TOTAL; i++) {
+        const i3 = i * 3;
+        posArr[i3] = start[i3];
+        posArr[i3+1] = start[i3+1];
+        posArr[i3+2] = start[i3+2];
+    }
+    posAttr.needsUpdate = true;
+});
+
+animate();
+console.log('❤️ 3D Blue Heart Particle System Loaded');
+</script>
+</body>
+</html>
